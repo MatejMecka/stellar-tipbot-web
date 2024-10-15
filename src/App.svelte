@@ -25,6 +25,7 @@
   let networkPassphrase;
   let networkPassphraseWalletKit;
   let xdr;
+  let isTestnet = false;
 
   let successAlert = false;
   let errorAlert = false;
@@ -45,6 +46,7 @@
     networkPassphrase = StellarSdk.Networks.TESTNET
     networkPassphraseWalletKit = WalletNetwork.TESTNET
     stellar_expert_url = "https://stellar.expert/explorer/testnet/tx/"
+    isTestnet = true;
   } else {
      server = new StellarSdk.Horizon.Server(
       "https://horizon.stellar.org",
@@ -154,7 +156,8 @@
           const body = {
             "discord_id": discord_user_id,
             "xdr": signed_transaction.toXDR(),
-            "turnstile_token": turnstile_token
+            "turnstile_token": turnstile_token,
+            "testnet": isTestnet
           }
 
           const options = {
