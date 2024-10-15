@@ -7,6 +7,7 @@
     XBULL_ID
   } from '@creit.tech/stellar-wallets-kit';
   import * as StellarSdk from '@stellar/stellar-sdk';
+  import { Turnstile } from 'svelte-turnstile';
 
   // Parameters required to execute transaction
   const urlParams = new URLSearchParams(window.location.search);
@@ -15,6 +16,7 @@
   let amount = urlParams.get('amount');
   let discord_user_id = urlParams.get('discord_id');
   const testnet = urlParams.get('testnet');
+  const submit_client = urlParams.get('submit_client')
 
   let discord_username = "Beary Bear";
   let discord_image = "https://static.wikia.nocookie.net/webarebears/images/4/45/Grizzly_Bear_Standing.png/revision/latest?cb=20160620214616";
@@ -27,9 +29,13 @@
   let successAlert = false;
   let errorAlert = false;
   let errorMessage = undefined;
+  let isLoading = false;
+  let message = "Submitting transaction to network...";
 
   let horizon_url = undefined;
   let stellar_expert_url = undefined;
+
+  let turnstile_token = undefined;
 
   if(testnet?.toLowerCase() == "true") {
     console.log("USING TESTNET")
@@ -123,36 +129,79 @@
         const { signedTxXdr } = await kit.signTransaction(xdr, {
         source,
         networkPassphrase: networkPassphraseWalletKit
-      });
+        });
 
       const signed_transaction = new StellarSdk.TransactionBuilder.fromXDR(
         signedTxXdr,
         networkPassphrase
       );
 
+      isLoading = true;
+
       console.log(signed_transaction)
 
       try {
-        const transactionResult = await server.submitTransaction(signed_transaction);
-        console.log(JSON.stringify(transactionResult, null, 2));
-        console.log('\nSuccess! View the transaction at: ');
-        console.log(transactionResult._links.transaction.href);
+        if(submit_client?.toLowerCase() == "true") {
+          const transactionResult = await server.submitTransaction(signed_transaction);
+          console.log(JSON.stringify(transactionResult, null, 2));
+          console.log('\nSuccess! View the transaction at: ');
+          console.log(transactionResult._links.transaction.href);
 
-        horizon_url = transactionResult._links.transaction.href
-        stellar_expert_url += transactionResult.id
-        successAlert = true
+          horizon_url = transactionResult._links.transaction.href
+          stellar_expert_url += transactionResult.id
+          successAlert = true
+        } else {
+          const body = {
+            "discord_id": discord_user_id,
+            "xdr": signed_transaction.toXDR(),
+            "turnstile_token": turnstile_token
+          }
 
+          const options = {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body:JSON.stringify(body)
+          };
+
+          fetch(`${import.meta.env.VITE_WORKER_URL}/submitTX`, options)
+            .then(response => response.json())
+            .then(response => {
+              if(response["success"] == true) {
+                horizon_url = response["tx_url_horizon"]
+                stellar_expert_url = response["stellar_expert_url"]
+                successAlert = true
+                isLoading = false;
+              } else {
+                errorMessage = response['error']['message']
+                errorAlert = true;
+                isLoading = false;
+              }
+              console.log(response)
+            })
+            .catch(err => {
+              console.error(err)
+              isLoading = false;
+            });
+
+        }
       } catch (e) {
         console.log('An error has occured:');
         console.log(e);
         errorMessage = e;
         errorAlert = true;
+        isLoading = false;
       }
 
       }
     });
 
     
+  }
+
+  const setTurnstileToken = function(data) {
+    console.log(`Retrieved turnstile token: ${data}`)
+    console.log(data)
+    turnstile_token = data["detail"]["token"];
   }
 
 </script>
@@ -170,6 +219,17 @@
 <div class="bg-red-100 border-l-4 border-red-500 text-red-700 p-4 mb-10" role="alert">
   <p class="font-bold">There was an error submitting!</p>
   <p>{errorMessage}</p>
+</div>
+{/if}
+
+{#if isLoading}
+<div class="fixed inset-0 flex items-center justify-center bg-black bg-opacity-50">
+  <div class="bg-white p-6 rounded-md shadow-lg sm:max-w-[425px]">
+    <div class="flex flex-col items-center justify-center">
+      <svg class="animate-spin h-20 w-20 mr-3 text-blue-500" xmlns="http://www.w3.org/2000/svg" width="5em" height="5em" viewBox="0 0 24 24"><path fill="currentColor" d="M12,4a8,8,0,0,1,7.89,6.7A1.53,1.53,0,0,0,21.38,12h0a1.5,1.5,0,0,0,1.48-1.75,11,11,0,0,0-21.72,0A1.5,1.5,0,0,0,2.62,12h0a1.53,1.53,0,0,0,1.49-1.3A8,8,0,0,1,12,4Z"><animateTransform attributeName="transform" dur="0.75s" repeatCount="indefinite" type="rotate" values="0 12 12;360 12 12"/></path></svg>
+      <p class="text-lg font-semibold text-center">{message}</p>
+    </div>
+  </div>
 </div>
 {/if}
 
@@ -235,6 +295,12 @@
             aria-label="Tip amount"
           />
         </div>
+        {#if import.meta.env.VITE_ENABLE_WORKER.toLowerCase() == 'true'}
+          <Turnstile 
+          siteKey={import.meta.env.VITE_TURNSTILE_SITE_KEY}
+          on:callback={(data) => setTurnstileToken(data)}
+          />
+        {/if}
         <button class="w-full max-w-xs text-lg py-6 bg-neutral-950 text-white rounded-md hover:bg-primary/90 transition-colors"   on:click={handleTransaction}>
           Tip
         </button>
